@@ -48,13 +48,14 @@ jobs:
             git -C "$APP_DIR" init
           fi
 
+          git config --global --add safe.directory "$APP_DIR"
+
           if git -C "$APP_DIR" remote get-url origin >/dev/null 2>&1; then
             git -C "$APP_DIR" remote set-url origin "$REPO_URL"
           else
             git -C "$APP_DIR" remote add origin "$REPO_URL"
           fi
 
-          git config --global --add safe.directory "$APP_DIR"
           git -C "$APP_DIR" fetch origin "$DEPLOY_BRANCH"
 
           if git -C "$APP_DIR" show-ref --verify --quiet "refs/heads/$DEPLOY_BRANCH"; then
