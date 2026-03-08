@@ -1,0 +1,16 @@
+[Unit]
+Description=Investment Simulations Streamlit App
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/investment-simulations-streamlit
+Environment=PATH=/opt/investment-simulations-streamlit/venv/bin:/usr/bin
+Environment=STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+ExecStart=/opt/investment-simulations-streamlit/venv/bin/streamlit run /opt/investment-simulations-streamlit/streamlit_app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
