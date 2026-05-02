@@ -7,10 +7,31 @@ This repo contains only the Streamlit dashboard and simulation engine from the o
 ## Features
 
 - Portfolio growth simulation with yearly contributions
-- Return model options: normal, Student's t, and crash-regime mixture
+- Return model options: regime-aware fat tails, normal IID, Student's t IID, and crash-regime mixture
 - Inflation-adjusted and nominal views
+- Optional contribution stop year
+- Optional yearly withdrawals starting in a chosen year
+- Chart markers for contribution-stop and withdrawal-start timing
 - Goal probability tracking
 - Interactive Plotly charts and CSV downloads
+
+## Modeling notes
+
+The default return model is `Regime-aware fat tails (recommended)`. It uses Student's t ordinary-year returns plus randomly occurring crash years. The ordinary-year mean is calibrated so the user-entered expected annual return remains the long-run target after accounting for crash years. This is intended to be a more realistic educational default than IID normal sampling while still keeping the model transparent.
+
+Contributions can be stopped before the end of the simulation by setting `Last contribution year`. A value of 10 means contributions are made through Year 10, then stop before Year 11.
+
+Withdrawals are applied at the end of each selected simulation year and balances are floored at zero when depleted. If withdrawals are enabled, the app also runs the same simulation settings without withdrawals so the median withdrawal impact can be shown using the same random seed. The charts show timing markers when contributions stop before the horizon or withdrawals begin.
+
+Known limitations from the statistical audit that are intentionally not implemented yet:
+
+- Single blended portfolio return instead of explicit asset allocation.
+- No asset correlations, covariance matrix, or rebalancing logic.
+- Deterministic inflation rather than stochastic inflation.
+- No taxes, account types, RMDs, Social Security, pensions, or other income sources.
+- No historical bootstrap or historical stress-scenario engine.
+- No uncertainty model around the expected return, volatility, or inflation inputs.
+- No dynamic retirement spending rules such as guardrails or probability-based spending adjustments.
 
 ## Local development
 
