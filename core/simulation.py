@@ -17,6 +17,8 @@ def simulate_paths(
     annual_withdrawal: float = 0.0,
     withdrawal_start_year: int = 1,
     withdrawal_growth_pct: float = 0.0,
+    supplemental_income: float = 0.0,
+    supplemental_income_start_year: int = 1,
     seed: int | None = 42,
     distribution: str = "regime-t",  # 'regime-t', 'normal', 't-distribution', 'mixture'
     t_df: float = 5.0,  # degrees of freedom for t-distribution
@@ -55,8 +57,11 @@ def simulate_paths(
     withdrawals = np.zeros(years, dtype=float)
     if annual_withdrawal > 0:
         start_year = max(1, min(int(withdrawal_start_year), years))
+        supp_start = max(1, min(int(supplemental_income_start_year), years))
         for year in range(start_year, years + 1):
-            withdrawals[year - 1] = annual_withdrawal * ((1 + wg) ** (year - start_year))
+            gross = annual_withdrawal * ((1 + wg) ** (year - start_year))
+            offset = supplemental_income if year >= supp_start else 0.0
+            withdrawals[year - 1] = max(gross - offset, 0.0)
 
     def draw_t_returns(loc: float, scale: float, size: tuple[int, int]) -> np.ndarray:
         t_samples = rng.standard_t(df=t_df, size=size)

@@ -57,10 +57,14 @@ def apply_figure_style(fig: go.Figure, title: str) -> go.Figure:
     return fig
 
 
+SUPPLEMENTAL_MARKER = "#7ba68a"
+
+
 def add_timing_markers(
     fig: go.Figure,
     contribution_stop_year: int | None = None,
     withdrawal_start_year: int | None = None,
+    supplemental_start_year: int | None = None,
 ) -> go.Figure:
     if contribution_stop_year is not None:
         fig.add_vline(
@@ -83,6 +87,17 @@ def add_timing_markers(
             annotation_position="top right",
             annotation_font_size=10,
             annotation_font_color=TEXT_COLOR,
+        )
+    if supplemental_start_year is not None:
+        fig.add_vline(
+            x=supplemental_start_year,
+            line_width=1,
+            line_dash="dashdot",
+            line_color=SUPPLEMENTAL_MARKER,
+            annotation_text="SS/income starts",
+            annotation_position="bottom right",
+            annotation_font_size=10,
+            annotation_font_color=SUPPLEMENTAL_MARKER,
         )
     return fig
 
@@ -362,7 +377,7 @@ with st.sidebar:
             value=0.0,
             step=5000.0,
             format="%0.2f",
-            help="Applied at the end of each selected simulation year and floored at zero if the portfolio is depleted.",
+            help="Total annual spending need from the portfolio, before any supplemental income offsets it.",
         )
         withdrawal_start = st.number_input(
             "First withdrawal year",
@@ -380,6 +395,31 @@ with st.sidebar:
             format="%0.2f",
             help="Use the inflation rate to model fixed real spending.",
         )
+
+        st.markdown("---")
+        st.markdown("**Supplemental income (SS, pension, etc.)**")
+        supplemental_monthly = st.number_input(
+            "Monthly income in today's dollars ($)",
+            min_value=0.0,
+            value=0.0,
+            step=500.0,
+            format="%0.0f",
+            help="Social Security, pension, or other income that reduces how much you need from the portfolio.",
+        )
+        supplemental_income = supplemental_monthly * 12
+        supplemental_income_start_year = st.number_input(
+            "Income starts in simulation year",
+            min_value=1,
+            max_value=int(years),
+            value=min(int(years), max(1, int(withdrawal_start) + 10)),
+            step=1,
+            help="The simulation year when this income begins (e.g., if you retire in year 20 and SS starts 10 years later, enter 30).",
+        )
+        if supplemental_income > 0:
+            st.caption(
+                f"Portfolio withdrawal drops from {format_currency(withdrawal)}/yr to "
+                f"~{format_currency(max(withdrawal - supplemental_income, 0))}/yr in year {supplemental_income_start_year}"
+            )
 
     st.markdown("**Retirement Goal**")
     desired_spending = st.number_input(
@@ -422,6 +462,8 @@ simulation_kwargs = dict(
     annual_withdrawal=withdrawal,
     withdrawal_start_year=int(withdrawal_start),
     withdrawal_growth_pct=withdrawal_growth,
+    supplemental_income=supplemental_income,
+    supplemental_income_start_year=int(supplemental_income_start_year),
     seed=int(seed),
     distribution=distribution,
     t_df=t_df,
@@ -436,6 +478,7 @@ if withdrawal > 0:
         **simulation_kwargs,
         "annual_withdrawal": 0.0,
         "withdrawal_growth_pct": 0.0,
+        "supplemental_income": 0.0,
     }
     bal_nom_no_withdraw, _ = simulate_paths(**no_withdraw_kwargs)
 
@@ -470,14 +513,18 @@ contribution_marker_year = (
     else None
 )
 withdrawal_marker_year = int(withdrawal_start) if withdrawal > 0 else None
+supplemental_marker_year = int(supplemental_income_start_year) if supplemental_income > 0 and withdrawal > 0 else None
 
 # Headline scorecard
+scorecard_subtitle = f"{n_sims:,} simulations · {years} years · supports {format_currency(desired_spending)}/yr at {withdrawal_rate:.1f}% withdrawal"
+if supplemental_income > 0:
+    scorecard_subtitle += f" · SS/income offsets {format_currency(supplemental_income)}/yr from year {supplemental_income_start_year}"
 st.markdown(
     f"""
     <div class="scorecard">
         <div class="label">Probability of reaching {format_currency(goal)} in today's dollars</div>
         <div class="value">{prob_reach_goal:.1f}%</div>
-        <div class="label">{n_sims:,} simulations · {years} years · supports {format_currency(desired_spending)}/yr at {withdrawal_rate:.1f}% withdrawal</div>
+        <div class="label">{scorecard_subtitle}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -533,7 +580,7 @@ MILESTONE_YEARS = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80]
 with tab1:
     fig1 = make_band_figure(summary_real, title="Portfolio value in today's dollars")
     add_goal_line(fig1, goal)
-    add_timing_markers(fig1, contribution_marker_year, withdrawal_marker_year)
+    add_timing_markers(fig1, contribution_marker_year, withdrawal_marker_year, supplemental_marker_year)
     st.plotly_chart(fig1, use_container_width=True)
 
     milestones = [0] + [y for y in MILESTONE_YEARS if y <= int(years)] + ([int(years)] if int(years) not in MILESTONE_YEARS else [])
@@ -552,7 +599,7 @@ with tab1:
 
 with tab2:
     fig2 = make_band_figure(summary_nom, title="Nominal portfolio value (future dollars)")
-    add_timing_markers(fig2, contribution_marker_year, withdrawal_marker_year)
+    add_timing_markers(fig2, contribution_marker_year, withdrawal_marker_year, supplemental_marker_year)
     st.plotly_chart(fig2, use_container_width=True)
 
     milestone_df_nom = summary_nom[summary_nom["Year"].isin(milestones)][["Year", "P10", "P50", "P90", "Mean"]].round(0)
@@ -625,7 +672,7 @@ with st.expander("Show a sample of individual simulation paths (nominal)"):
         fig_paths.add_trace(go.Scatter(x=yrs, y=bal_nom[i, :], mode="lines", name=f"sim {i+1}", line=dict(width=1, color="rgba(111,130,149,0.28)")))
     fig_paths.add_trace(go.Scatter(x=summary_nom["Year"], y=summary_nom["P50"], mode="lines", name="Median", line=dict(width=3, color=PRIMARY_LINE)))
     apply_figure_style(fig_paths, "Sample simulation paths (nominal)")
-    add_timing_markers(fig_paths, contribution_marker_year, withdrawal_marker_year)
+    add_timing_markers(fig_paths, contribution_marker_year, withdrawal_marker_year, supplemental_marker_year)
     fig_paths.update_layout(showlegend=False)
     st.plotly_chart(fig_paths, use_container_width=True)
 
