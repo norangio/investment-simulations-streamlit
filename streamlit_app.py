@@ -492,21 +492,10 @@ total_contributions = initial + sum(
     contrib * ((1 + contrib_growth / 100) ** t)
     for t in range(min(int(contribution_stop_year), int(years)))
 )
-scheduled_withdrawals = (
-    sum(withdrawal * ((1 + withdrawal_growth / 100) ** (year - withdrawal_start)) for year in range(int(withdrawal_start), int(years) + 1))
-    if withdrawal > 0
-    else 0.0
-)
-prob_reach_goal = (final_values_real >= goal).mean() * 100
+prob_depletion = (final_values_real <= 0).mean() * 100
 median_final = np.median(final_values_real)
 p10_final = np.percentile(final_values_real, 10)
 p90_final = np.percentile(final_values_real, 90)
-median_withdrawal_impact = None
-if bal_nom_no_withdraw is not None:
-    bal_real_no_withdraw = bal_nom_no_withdraw.copy()
-    for t in range(bal_real_no_withdraw.shape[1]):
-        bal_real_no_withdraw[:, t] /= (1 + inflation / 100) ** t
-    median_withdrawal_impact = median_final - np.median(bal_real_no_withdraw[:, -1])
 contribution_marker_year = (
     int(contribution_stop_year)
     if contrib > 0 and 0 <= int(contribution_stop_year) < int(years)
@@ -516,15 +505,15 @@ withdrawal_marker_year = int(withdrawal_start) if withdrawal > 0 else None
 supplemental_marker_year = int(supplemental_income_start_year) if supplemental_income > 0 and withdrawal > 0 else None
 
 # Headline scorecard
-scorecard_subtitle = f"{n_sims:,} simulations · {years} years · supports {format_currency(desired_spending)}/yr at {withdrawal_rate:.1f}% withdrawal"
+scorecard_context = f"{n_sims:,} simulations · {years}-year horizon · {format_currency(desired_spending)}/yr spending"
 if supplemental_income > 0:
-    scorecard_subtitle += f" · SS/income offsets {format_currency(supplemental_income)}/yr from year {supplemental_income_start_year}"
+    scorecard_context += f" · SS/income offsets {format_currency(supplemental_income)}/yr from year {supplemental_income_start_year}"
 st.markdown(
     f"""
     <div class="scorecard">
-        <div class="label">Probability of reaching {format_currency(goal)} in today's dollars</div>
-        <div class="value">{prob_reach_goal:.1f}%</div>
-        <div class="label">{scorecard_subtitle}</div>
+        <div class="label">Probability of running out of money</div>
+        <div class="value">{prob_depletion:.1f}%</div>
+        <div class="label">{scorecard_context}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -533,22 +522,16 @@ st.markdown(
 # Key metrics row (all in today's dollars)
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    if total_contributions > 0:
-        st.metric(
-            label="Median Final (today's $)",
-            value=format_currency(median_final),
-            delta=f"{((median_final / total_contributions) - 1) * 100:.0f}% vs contributions",
-        )
-    else:
-        st.metric(
-            label="Median Final (today's $)",
-            value=format_currency(median_final),
-        )
+    st.metric(
+        label="Median Remaining (today's $)",
+        value=format_currency(median_final),
+        help="Median portfolio value at end of horizon in today's purchasing power"
+    )
 with col2:
     st.metric(
         label="10th Percentile (today's $)",
         value=format_currency(p10_final),
-        help="Worst 10% of outcomes in today's purchasing power"
+        help="Worst 10% of outcomes — if this is $0, more than 10% of scenarios deplete"
     )
 with col3:
     st.metric(
@@ -557,18 +540,11 @@ with col3:
         help="Best 10% of outcomes in today's purchasing power"
     )
 with col4:
-    if median_withdrawal_impact is None:
-        st.metric(
-            label="Scheduled Withdrawals",
-            value=format_currency(scheduled_withdrawals),
-            help="Total planned withdrawals over the simulation horizon."
-        )
-    else:
-        st.metric(
-            label="Withdrawal Impact (today's $)",
-            value=format_currency(median_withdrawal_impact),
-            help="Difference versus the same simulation settings with no withdrawals, in today's purchasing power."
-        )
+    st.metric(
+        label="Required Portfolio (today's $)",
+        value=format_currency(goal),
+        help=f"Need {format_currency(goal)} to support {format_currency(desired_spending)}/yr at {withdrawal_rate:.1f}% withdrawal rate"
+    )
 
 st.divider()
 
@@ -661,7 +637,11 @@ with tab3:
         showlegend=False,
     )
     st.plotly_chart(fig_hist, use_container_width=True)
-    st.caption(f"{prob_reach_goal:.1f}% of simulations reach or exceed {format_currency(goal)} in today's purchasing power.")
+    prob_above_goal = (final_values_real >= goal).mean() * 100
+    st.caption(
+        f"{prob_depletion:.1f}% of simulations deplete the portfolio. "
+        f"{prob_above_goal:.1f}% end above the {format_currency(goal)} target."
+    )
 
 # Sample paths (kept as an expander)
 with st.expander("Show a sample of individual simulation paths (nominal)"):
