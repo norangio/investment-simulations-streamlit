@@ -381,8 +381,26 @@ with st.sidebar:
             help="Use the inflation rate to model fixed real spending.",
         )
 
-    st.markdown("**Goal**")
-    goal = st.number_input("Target portfolio value ($)", min_value=0.0, value=1000000.0, step=50000.0, format="%0.0f", help="Used to calculate probability of reaching your goal")
+    st.markdown("**Retirement Goal**")
+    desired_spending = st.number_input(
+        "Desired annual spending in today's dollars ($)",
+        min_value=0.0,
+        value=150000.0,
+        step=5000.0,
+        format="%0.0f",
+        help="How much you want to withdraw per year in retirement, in today's purchasing power.",
+    )
+    withdrawal_rate = st.number_input(
+        "Safe withdrawal rate (%)",
+        min_value=0.1,
+        max_value=20.0,
+        value=4.0,
+        step=0.25,
+        format="%0.2f",
+        help="The 4% rule means you need 25x your annual spending. Lower rates are more conservative.",
+    )
+    goal = desired_spending / (withdrawal_rate / 100)
+    st.caption(f"Required portfolio: **{format_currency(goal)}** in today's dollars")
 
     with st.expander("Simulation settings"):
         n_sims = st.slider("Number of simulations", min_value=100, max_value=20000, value=5000, step=100)
@@ -425,8 +443,8 @@ if withdrawal > 0:
 summary_nom = summarize_paths(bal_nom)
 summary_real = summarize_paths(bal_real)
 
-# Calculate key metrics
-final_values = bal_nom[:, -1]
+# Calculate key metrics (all in real/today's dollars)
+final_values_real = bal_real[:, -1]
 total_contributions = initial + sum(
     contrib * ((1 + contrib_growth / 100) ** t)
     for t in range(min(int(contribution_stop_year), int(years)))
@@ -436,13 +454,16 @@ scheduled_withdrawals = (
     if withdrawal > 0
     else 0.0
 )
-prob_reach_goal = (final_values >= goal).mean() * 100
-median_final = np.median(final_values)
-p10_final = np.percentile(final_values, 10)
-p90_final = np.percentile(final_values, 90)
+prob_reach_goal = (final_values_real >= goal).mean() * 100
+median_final = np.median(final_values_real)
+p10_final = np.percentile(final_values_real, 10)
+p90_final = np.percentile(final_values_real, 90)
 median_withdrawal_impact = None
 if bal_nom_no_withdraw is not None:
-    median_withdrawal_impact = median_final - np.median(bal_nom_no_withdraw[:, -1])
+    bal_real_no_withdraw = bal_nom_no_withdraw.copy()
+    for t in range(bal_real_no_withdraw.shape[1]):
+        bal_real_no_withdraw[:, t] /= (1 + inflation / 100) ** t
+    median_withdrawal_impact = median_final - np.median(bal_real_no_withdraw[:, -1])
 contribution_marker_year = (
     int(contribution_stop_year)
     if contrib > 0 and 0 <= int(contribution_stop_year) < int(years)
@@ -454,39 +475,39 @@ withdrawal_marker_year = int(withdrawal_start) if withdrawal > 0 else None
 st.markdown(
     f"""
     <div class="scorecard">
-        <div class="label">Probability of reaching {format_currency(goal)}</div>
+        <div class="label">Probability of reaching {format_currency(goal)} in today's dollars</div>
         <div class="value">{prob_reach_goal:.1f}%</div>
-        <div class="label">across {n_sims:,} simulations over {years} years</div>
+        <div class="label">{n_sims:,} simulations · {years} years · supports {format_currency(desired_spending)}/yr at {withdrawal_rate:.1f}% withdrawal</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# Key metrics row
+# Key metrics row (all in today's dollars)
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     if total_contributions > 0:
         st.metric(
-            label="Median Final Value",
+            label="Median Final (today's $)",
             value=format_currency(median_final),
             delta=f"{((median_final / total_contributions) - 1) * 100:.0f}% vs contributions",
         )
     else:
         st.metric(
-            label="Median Final Value",
+            label="Median Final (today's $)",
             value=format_currency(median_final),
         )
 with col2:
     st.metric(
-        label="10th Percentile",
+        label="10th Percentile (today's $)",
         value=format_currency(p10_final),
-        help="Worst 10% of outcomes"
+        help="Worst 10% of outcomes in today's purchasing power"
     )
 with col3:
     st.metric(
-        label="90th Percentile",
+        label="90th Percentile (today's $)",
         value=format_currency(p90_final),
-        help="Best 10% of outcomes"
+        help="Best 10% of outcomes in today's purchasing power"
     )
 with col4:
     if median_withdrawal_impact is None:
@@ -497,28 +518,46 @@ with col4:
         )
     else:
         st.metric(
-            label="Withdrawal Impact",
+            label="Withdrawal Impact (today's $)",
             value=format_currency(median_withdrawal_impact),
-            help="Difference versus the same simulation settings with no withdrawals."
+            help="Difference versus the same simulation settings with no withdrawals, in today's purchasing power."
         )
 
 st.divider()
 
 # Tabs for nominal vs real
-tab1, tab2, tab3 = st.tabs(["Nominal $", "Real $ (inflation-adjusted)", "Distribution of Outcomes"])
+tab1, tab2, tab3 = st.tabs(["Today's Dollars", "Nominal $", "Distribution of Outcomes"])
 
 MILESTONE_YEARS = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80]
 
 with tab1:
-    fig1 = make_band_figure(summary_nom, title="Nominal portfolio value")
+    fig1 = make_band_figure(summary_real, title="Portfolio value in today's dollars")
     add_goal_line(fig1, goal)
     add_timing_markers(fig1, contribution_marker_year, withdrawal_marker_year)
     st.plotly_chart(fig1, use_container_width=True)
 
     milestones = [0] + [y for y in MILESTONE_YEARS if y <= int(years)] + ([int(years)] if int(years) not in MILESTONE_YEARS else [])
-    milestone_df = summary_nom[summary_nom["Year"].isin(milestones)][["Year", "P10", "P50", "P90", "Mean"]].round(0)
-    milestone_df = milestone_df.rename(columns={"P10": "P10 $", "P50": "Median $", "P90": "P90 $", "Mean": "Mean $"})
+    milestone_df = summary_real[summary_real["Year"].isin(milestones)][["Year", "P10", "P50", "P90", "Mean"]].round(0)
+    milestone_df = milestone_df.rename(columns={"P10": "P10 (today's $)", "P50": "Median (today's $)", "P90": "P90 (today's $)", "Mean": "Mean (today's $)"})
     st.dataframe(milestone_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Full yearly table"):
+        st.dataframe(
+            summary_real[["Year", "P10", "P50", "P90", "Mean"]]
+            .round(0)
+            .rename(columns={"P10": "P10 (today's $)", "P50": "Median (today's $)", "P90": "P90 (today's $)", "Mean": "Mean (today's $)"}),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+with tab2:
+    fig2 = make_band_figure(summary_nom, title="Nominal portfolio value (future dollars)")
+    add_timing_markers(fig2, contribution_marker_year, withdrawal_marker_year)
+    st.plotly_chart(fig2, use_container_width=True)
+
+    milestone_df_nom = summary_nom[summary_nom["Year"].isin(milestones)][["Year", "P10", "P50", "P90", "Mean"]].round(0)
+    milestone_df_nom = milestone_df_nom.rename(columns={"P10": "P10 $", "P50": "Median $", "P90": "P90 $", "Mean": "Mean $"})
+    st.dataframe(milestone_df_nom, use_container_width=True, hide_index=True)
 
     with st.expander("Full yearly table"):
         st.dataframe(
@@ -529,30 +568,11 @@ with tab1:
             hide_index=True,
         )
 
-with tab2:
-    fig2 = make_band_figure(summary_real, title="Inflation-adjusted portfolio value (real)")
-    add_goal_line(fig2, goal)
-    add_timing_markers(fig2, contribution_marker_year, withdrawal_marker_year)
-    st.plotly_chart(fig2, use_container_width=True)
-
-    milestone_df_real = summary_real[summary_real["Year"].isin(milestones)][["Year", "P10", "P50", "P90", "Mean"]].round(0)
-    milestone_df_real = milestone_df_real.rename(columns={"P10": "P10 $ (real)", "P50": "Median $ (real)", "P90": "P90 $ (real)", "Mean": "Mean $ (real)"})
-    st.dataframe(milestone_df_real, use_container_width=True, hide_index=True)
-
-    with st.expander("Full yearly table"):
-        st.dataframe(
-            summary_real[["Year", "P10", "P50", "P90", "Mean"]]
-            .round(0)
-            .rename(columns={"P10": "P10 $ (real)", "P50": "Median $ (real)", "P90": "P90 $ (real)", "Mean": "Mean $ (real)"}),
-            use_container_width=True,
-            hide_index=True,
-        )
-
 with tab3:
     fig_hist = go.Figure()
     fig_hist.add_trace(
         go.Histogram(
-            x=final_values,
+            x=final_values_real,
             nbinsx=80,
             marker_color=PRIMARY_LINE,
             opacity=0.75,
@@ -580,8 +600,8 @@ with tab3:
         annotation_font_color=TEXT_COLOR,
     )
     fig_hist.update_layout(
-        title="Distribution of Final Portfolio Values",
-        xaxis_title="Final portfolio value ($)",
+        title="Distribution of Final Portfolio Values (today's dollars)",
+        xaxis_title="Final portfolio value (today's $)",
         yaxis_title="Count",
         margin=dict(l=40, r=20, t=54, b=40),
         paper_bgcolor="#f7f8fa",
@@ -594,7 +614,7 @@ with tab3:
         showlegend=False,
     )
     st.plotly_chart(fig_hist, use_container_width=True)
-    st.caption(f"{prob_reach_goal:.1f}% of simulations reach or exceed the goal of {format_currency(goal)}.")
+    st.caption(f"{prob_reach_goal:.1f}% of simulations reach or exceed {format_currency(goal)} in today's purchasing power.")
 
 # Sample paths (kept as an expander)
 with st.expander("Show a sample of individual simulation paths (nominal)"):
