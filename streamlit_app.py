@@ -35,6 +35,7 @@ GRID_COLOR = "#e5e7eb"
 TEXT_COLOR = "#27313b"
 CONTRIBUTION_MARKER = "#8aa0b3"
 WITHDRAWAL_MARKER = "#b8949f"
+GOAL_LINE = "#7ba68a"
 
 
 def apply_figure_style(fig: go.Figure, title: str) -> go.Figure:
@@ -86,10 +87,23 @@ def add_timing_markers(
     return fig
 
 
+def add_goal_line(fig: go.Figure, goal: float) -> go.Figure:
+    fig.add_hline(
+        y=goal,
+        line_width=1.5,
+        line_dash="dash",
+        line_color=GOAL_LINE,
+        annotation_text=f"Goal: {format_currency(goal)}",
+        annotation_position="top right",
+        annotation_font_size=10,
+        annotation_font_color=GOAL_LINE,
+    )
+    return fig
+
+
 def make_band_figure(df: pd.DataFrame, title: str = "Portfolio Value Over Time") -> go.Figure:
     fig = go.Figure()
 
-    # Shaded 10-90 band
     fig.add_trace(
         go.Scatter(
             x=df["Year"], y=df["P90"],
@@ -106,7 +120,6 @@ def make_band_figure(df: pd.DataFrame, title: str = "Portfolio Value Over Time")
         )
     )
 
-    # Median
     fig.add_trace(
         go.Scatter(
             x=df["Year"], y=df["P50"],
@@ -116,6 +129,17 @@ def make_band_figure(df: pd.DataFrame, title: str = "Portfolio Value Over Time")
     )
 
     return apply_figure_style(fig, title)
+
+
+def format_currency(value: float) -> str:
+    sign = "-" if value < 0 else ""
+    abs_value = abs(value)
+    if abs_value >= 1_000_000:
+        return f"{sign}${abs_value / 1_000_000:.2f}M"
+    elif abs_value >= 1_000:
+        return f"{sign}${abs_value / 1_000:.0f}K"
+    else:
+        return f"{sign}${abs_value:.0f}"
 
 
 # -----------------------------
@@ -144,6 +168,12 @@ st.markdown(
             font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
             font-size: 14px;
         }
+
+        /* Hide Streamlit chrome */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        [data-testid="stToolbar"] {visibility: hidden;}
+        header[data-testid="stHeader"] {background: transparent;}
 
         [data-testid="stSidebar"] {
             background: #eef1f3;
@@ -199,6 +229,28 @@ st.markdown(
             font-size: 0.75rem;
         }
 
+        /* Highlighted scorecard */
+        .scorecard {
+            background: linear-gradient(135deg, #eaf2ed 0%, #f0f5f2 100%);
+            border: 1.5px solid #b9d8c5;
+            border-radius: 8px;
+            padding: 1.2rem 1.5rem;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        .scorecard .value {
+            font-family: "IBM Plex Mono", ui-monospace, monospace;
+            font-size: 2.2rem;
+            font-weight: 600;
+            color: var(--text);
+            margin: 0.3rem 0;
+        }
+        .scorecard .label {
+            font-size: 0.8rem;
+            color: var(--muted);
+            font-weight: 500;
+        }
+
         div[data-baseweb="select"] > div,
         input,
         textarea {
@@ -246,14 +298,14 @@ st.title("Monte Carlo Investment Planner")
 st.caption("Projection model for portfolio accumulation, withdrawals, and tail-risk scenarios.")
 
 with st.sidebar:
-    st.header("Inputs")
+    st.markdown("**Core Assumptions**")
     default_mean, default_std = 7.0, 15.0
 
     initial = st.number_input("Initial investment ($)", min_value=0.0, value=10000.0, step=1000.0, format="%0.2f")
     contrib = st.number_input("Annual contribution ($)", min_value=0.0, value=12000.0, step=1000.0, format="%0.2f")
     years = st.number_input("Horizon (years)", min_value=1, max_value=80, value=30, step=1)
 
-    st.subheader("Returns")
+    st.markdown("**Returns**")
     mean_ret = st.number_input(
         "Long-run expected annual return (%)",
         value=default_mean,
@@ -264,34 +316,33 @@ with st.sidebar:
     std_ret = st.number_input("Annual volatility (stdev, %)", value=default_std, step=0.5, format="%0.2f")
     expense_ratio = st.number_input("Annual expense ratio (%)", min_value=0.0, value=0.05, step=0.01, format="%0.2f")
 
-    st.subheader("Return Distribution")
-    distribution_label = st.selectbox(
-        "Distribution type",
-        options=list(DISTRIBUTION_OPTIONS.values()),
-        index=0,
-        help="Controls how annual returns are sampled."
-    )
-    distribution = next(key for key, label in DISTRIBUTION_OPTIONS.items() if label == distribution_label)
-    st.caption(DISTRIBUTION_HELP[distribution])
-
-    # Show distribution-specific parameters
-    t_df = 5.0
-    crash_prob = 8.0
-    crash_mean = -24.0
-    crash_std = 25.0
-
-    if distribution in {"regime-t", "t-distribution"}:
-        t_df = st.number_input(
-            "Degrees of freedom",
-            min_value=2.1, max_value=30.0, value=5.0, step=0.5,
-            help="Lower = fatter tails (more extreme events). 5-10 is typical for financial modeling. >30 approaches normal."
+    with st.expander("Distribution settings"):
+        distribution_label = st.selectbox(
+            "Distribution type",
+            options=list(DISTRIBUTION_OPTIONS.values()),
+            index=0,
+            help="Controls how annual returns are sampled."
         )
-    if distribution in {"regime-t", "mixture"}:
-        crash_prob = st.number_input("Crash probability per year (%)", min_value=0.0, max_value=50.0, value=8.0, step=1.0)
-        crash_mean = st.number_input("Crash year mean return (%)", value=-24.0, step=1.0)
-        crash_std = st.number_input("Crash year volatility (%)", min_value=0.1, value=25.0, step=1.0)
+        distribution = next(key for key, label in DISTRIBUTION_OPTIONS.items() if label == distribution_label)
+        st.caption(DISTRIBUTION_HELP[distribution])
 
-    st.subheader("Contributions & Inflation")
+        t_df = 5.0
+        crash_prob = 8.0
+        crash_mean = -24.0
+        crash_std = 25.0
+
+        if distribution in {"regime-t", "t-distribution"}:
+            t_df = st.number_input(
+                "Degrees of freedom",
+                min_value=2.1, max_value=30.0, value=5.0, step=0.5,
+                help="Lower = fatter tails (more extreme events). 5-10 is typical for financial modeling. >30 approaches normal."
+            )
+        if distribution in {"regime-t", "mixture"}:
+            crash_prob = st.number_input("Crash probability per year (%)", min_value=0.0, max_value=50.0, value=8.0, step=1.0)
+            crash_mean = st.number_input("Crash year mean return (%)", value=-24.0, step=1.0)
+            crash_std = st.number_input("Crash year volatility (%)", min_value=0.1, value=25.0, step=1.0)
+
+    st.markdown("**Contributions & Inflation**")
     contrib_growth = st.number_input("Contribution growth per year (%)", min_value=0.0, value=0.0, step=0.5, format="%0.2f")
     contribution_stop_year = st.number_input(
         "Last contribution year",
@@ -304,38 +355,38 @@ with st.sidebar:
     inflation = st.number_input("Inflation (for real dollars, %)", min_value=0.0, value=2.5, step=0.1, format="%0.2f")
     timing = st.selectbox("Contribution timing", options=["start", "end"], index=0, help="Start = before growth; End = after growth")
 
-    st.subheader("Withdrawals")
-    withdrawal = st.number_input(
-        "Annual withdrawal ($)",
-        min_value=0.0,
-        value=0.0,
-        step=5000.0,
-        format="%0.2f",
-        help="Applied at the end of each selected simulation year and floored at zero if the portfolio is depleted.",
-    )
-    withdrawal_start = st.number_input(
-        "First withdrawal year",
-        min_value=1,
-        max_value=int(years),
-        value=min(10, int(years)),
-        step=1,
-        help="A value of 10 means the first withdrawal is taken at the end of Year 10.",
-    )
-    withdrawal_growth = st.number_input(
-        "Withdrawal growth per year (%)",
-        min_value=0.0,
-        value=float(inflation),
-        step=0.1,
-        format="%0.2f",
-        help="Use the inflation rate to model fixed real spending.",
-    )
+    with st.expander("Withdrawals"):
+        withdrawal = st.number_input(
+            "Annual withdrawal ($)",
+            min_value=0.0,
+            value=0.0,
+            step=5000.0,
+            format="%0.2f",
+            help="Applied at the end of each selected simulation year and floored at zero if the portfolio is depleted.",
+        )
+        withdrawal_start = st.number_input(
+            "First withdrawal year",
+            min_value=1,
+            max_value=int(years),
+            value=min(10, int(years)),
+            step=1,
+            help="A value of 10 means the first withdrawal is taken at the end of Year 10.",
+        )
+        withdrawal_growth = st.number_input(
+            "Withdrawal growth per year (%)",
+            min_value=0.0,
+            value=float(inflation),
+            step=0.1,
+            format="%0.2f",
+            help="Use the inflation rate to model fixed real spending.",
+        )
 
-    st.subheader("Goal")
+    st.markdown("**Goal**")
     goal = st.number_input("Target portfolio value ($)", min_value=0.0, value=1000000.0, step=50000.0, format="%0.0f", help="Used to calculate probability of reaching your goal")
 
-    st.subheader("Simulation")
-    n_sims = st.slider("Number of simulations", min_value=100, max_value=20000, value=5000, step=100)
-    seed = st.number_input("Random seed (optional)", value=42)
+    with st.expander("Simulation settings"):
+        n_sims = st.slider("Number of simulations", min_value=100, max_value=20000, value=5000, step=100)
+        seed = st.number_input("Random seed (optional)", value=42)
 
 # Run simulation
 simulation_kwargs = dict(
@@ -374,17 +425,6 @@ if withdrawal > 0:
 summary_nom = summarize_paths(bal_nom)
 summary_real = summarize_paths(bal_real)
 
-# Helper for formatting currency
-def format_currency(value: float) -> str:
-    sign = "-" if value < 0 else ""
-    abs_value = abs(value)
-    if abs_value >= 1_000_000:
-        return f"{sign}${abs_value / 1_000_000:.2f}M"
-    elif abs_value >= 1_000:
-        return f"{sign}${abs_value / 1_000:.0f}K"
-    else:
-        return f"{sign}${abs_value:.0f}"
-
 # Calculate key metrics
 final_values = bal_nom[:, -1]
 total_contributions = initial + sum(
@@ -410,9 +450,20 @@ contribution_marker_year = (
 )
 withdrawal_marker_year = int(withdrawal_start) if withdrawal > 0 else None
 
+# Headline scorecard
+st.markdown(
+    f"""
+    <div class="scorecard">
+        <div class="label">Probability of reaching {format_currency(goal)}</div>
+        <div class="value">{prob_reach_goal:.1f}%</div>
+        <div class="label">across {n_sims:,} simulations over {years} years</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Key metrics row
-st.subheader("Key Metrics")
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     if total_contributions > 0:
         st.metric(
@@ -437,15 +488,7 @@ with col3:
         value=format_currency(p90_final),
         help="Best 10% of outcomes"
     )
-
-col4, col5 = st.columns(2)
 with col4:
-    st.metric(
-        label=f"Prob. of {format_currency(goal)}",
-        value=f"{prob_reach_goal:.1f}%",
-        help=f"Chance of reaching your ${goal:,.0f} goal"
-    )
-with col5:
     if median_withdrawal_impact is None:
         st.metric(
             label="Scheduled Withdrawals",
@@ -454,7 +497,7 @@ with col5:
         )
     else:
         st.metric(
-            label="Median Withdrawal Impact",
+            label="Withdrawal Impact",
             value=format_currency(median_withdrawal_impact),
             help="Difference versus the same simulation settings with no withdrawals."
         )
@@ -462,52 +505,137 @@ with col5:
 st.divider()
 
 # Tabs for nominal vs real
-tab1, tab2 = st.tabs(["Nominal $", "Real $ (inflation-adjusted)"])
+tab1, tab2, tab3 = st.tabs(["Nominal $", "Real $ (inflation-adjusted)", "Distribution of Outcomes"])
+
+MILESTONE_YEARS = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80]
 
 with tab1:
-    st.subheader("Summary table (Nominal $)")
-    st.dataframe(
-        summary_nom[["Year", "P10", "P50", "P90", "Mean"]]
-        .round(0)
-        .rename(columns={"P10": "P10 $", "P50": "Median $", "P90": "P90 $", "Mean": "Mean $"}),
-        use_container_width=True,
-    )
     fig1 = make_band_figure(summary_nom, title="Nominal portfolio value")
+    add_goal_line(fig1, goal)
     add_timing_markers(fig1, contribution_marker_year, withdrawal_marker_year)
     st.plotly_chart(fig1, use_container_width=True)
 
+    milestones = [0] + [y for y in MILESTONE_YEARS if y <= int(years)] + ([int(years)] if int(years) not in MILESTONE_YEARS else [])
+    milestone_df = summary_nom[summary_nom["Year"].isin(milestones)][["Year", "P10", "P50", "P90", "Mean"]].round(0)
+    milestone_df = milestone_df.rename(columns={"P10": "P10 $", "P50": "Median $", "P90": "P90 $", "Mean": "Mean $"})
+    st.dataframe(milestone_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Full yearly table"):
+        st.dataframe(
+            summary_nom[["Year", "P10", "P50", "P90", "Mean"]]
+            .round(0)
+            .rename(columns={"P10": "P10 $", "P50": "Median $", "P90": "P90 $", "Mean": "Mean $"}),
+            use_container_width=True,
+            hide_index=True,
+        )
+
 with tab2:
-    st.subheader("Summary table (Real $)")
-    st.dataframe(
-        summary_real[["Year", "P10", "P50", "P90", "Mean"]]
-        .round(0)
-        .rename(columns={"P10": "P10 $ (real)", "P50": "Median $ (real)", "P90": "P90 $ (real)", "Mean": "Mean $ (real)"}),
-        use_container_width=True,
-    )
     fig2 = make_band_figure(summary_real, title="Inflation-adjusted portfolio value (real)")
+    add_goal_line(fig2, goal)
     add_timing_markers(fig2, contribution_marker_year, withdrawal_marker_year)
     st.plotly_chart(fig2, use_container_width=True)
 
-# Optional: show a sample of single paths
+    milestone_df_real = summary_real[summary_real["Year"].isin(milestones)][["Year", "P10", "P50", "P90", "Mean"]].round(0)
+    milestone_df_real = milestone_df_real.rename(columns={"P10": "P10 $ (real)", "P50": "Median $ (real)", "P90": "P90 $ (real)", "Mean": "Mean $ (real)"})
+    st.dataframe(milestone_df_real, use_container_width=True, hide_index=True)
+
+    with st.expander("Full yearly table"):
+        st.dataframe(
+            summary_real[["Year", "P10", "P50", "P90", "Mean"]]
+            .round(0)
+            .rename(columns={"P10": "P10 $ (real)", "P50": "Median $ (real)", "P90": "P90 $ (real)", "Mean": "Mean $ (real)"}),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+with tab3:
+    fig_hist = go.Figure()
+    fig_hist.add_trace(
+        go.Histogram(
+            x=final_values,
+            nbinsx=80,
+            marker_color=PRIMARY_LINE,
+            opacity=0.75,
+            name="Final values",
+        )
+    )
+    fig_hist.add_vline(
+        x=goal,
+        line_width=2,
+        line_dash="dash",
+        line_color=GOAL_LINE,
+        annotation_text=f"Goal: {format_currency(goal)}",
+        annotation_position="top right",
+        annotation_font_size=11,
+        annotation_font_color=GOAL_LINE,
+    )
+    fig_hist.add_vline(
+        x=median_final,
+        line_width=2,
+        line_dash="solid",
+        line_color=TEXT_COLOR,
+        annotation_text=f"Median: {format_currency(median_final)}",
+        annotation_position="top left",
+        annotation_font_size=11,
+        annotation_font_color=TEXT_COLOR,
+    )
+    fig_hist.update_layout(
+        title="Distribution of Final Portfolio Values",
+        xaxis_title="Final portfolio value ($)",
+        yaxis_title="Count",
+        margin=dict(l=40, r=20, t=54, b=40),
+        paper_bgcolor="#f7f8fa",
+        plot_bgcolor="#ffffff",
+        font=dict(family="Inter, -apple-system, BlinkMacSystemFont, sans-serif", size=12, color=TEXT_COLOR),
+        title_font=dict(size=15, color=TEXT_COLOR),
+        xaxis=dict(gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR),
+        yaxis=dict(gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR),
+        bargap=0.05,
+        showlegend=False,
+    )
+    st.plotly_chart(fig_hist, use_container_width=True)
+    st.caption(f"{prob_reach_goal:.1f}% of simulations reach or exceed the goal of {format_currency(goal)}.")
+
+# Sample paths (kept as an expander)
 with st.expander("Show a sample of individual simulation paths (nominal)"):
     n_show = st.slider("How many paths to overlay?", 1, 200, 20)
     yrs = np.arange(0, years + 1)
     fig_paths = go.Figure()
     for i in range(n_show):
         fig_paths.add_trace(go.Scatter(x=yrs, y=bal_nom[i, :], mode="lines", name=f"sim {i+1}", line=dict(width=1, color="rgba(111,130,149,0.28)")))
-    # Add median for reference
     fig_paths.add_trace(go.Scatter(x=summary_nom["Year"], y=summary_nom["P50"], mode="lines", name="Median", line=dict(width=3, color=PRIMARY_LINE)))
     apply_figure_style(fig_paths, "Sample simulation paths (nominal)")
     add_timing_markers(fig_paths, contribution_marker_year, withdrawal_marker_year)
     fig_paths.update_layout(showlegend=False)
     st.plotly_chart(fig_paths, use_container_width=True)
 
+st.divider()
+
 # Downloads
+colA, colB = st.columns(2)
 csv_nom = summary_nom.to_csv(index=False).encode("utf-8")
 csv_real = summary_real.to_csv(index=False).encode("utf-8")
-
-colA, colB = st.columns(2)
 with colA:
     st.download_button("Download summary (Nominal $)", data=csv_nom, file_name="summary_nominal.csv", mime="text/csv")
 with colB:
     st.download_button("Download summary (Real $)", data=csv_real, file_name="summary_real.csv", mime="text/csv")
+
+# Methodology
+with st.expander("Methodology"):
+    st.markdown(
+        """
+        This tool runs a Monte Carlo simulation of portfolio growth under user-specified assumptions.
+        Each simulation samples annual returns from the selected distribution, applies contributions
+        (with optional growth), deducts expenses, and applies withdrawals when configured.
+
+        **Key assumptions:**
+        - Returns are independent year-to-year (no serial correlation)
+        - Contributions and withdrawals occur at the specified timing within each year
+        - Expense ratio is deducted annually from portfolio value
+        - Inflation adjustment uses a constant annual rate for real-dollar conversion
+        - The regime-t model calibrates ordinary-year returns so the long-run expectation matches the user's input
+
+        Results show the distribution of outcomes across all simulations — not a single forecast.
+        The 10th-90th percentile band captures the middle 80% of outcomes.
+        """
+    )
