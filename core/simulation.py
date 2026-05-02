@@ -60,7 +60,10 @@ def simulate_paths(
         supp_start = max(1, min(int(supplemental_income_start_year), years))
         for year in range(start_year, years + 1):
             gross = annual_withdrawal * ((1 + wg) ** (year - start_year))
-            offset = supplemental_income if year >= supp_start else 0.0
+            if year >= supp_start:
+                offset = supplemental_income * ((1 + wg) ** (year - supp_start))
+            else:
+                offset = 0.0
             withdrawals[year - 1] = max(gross - offset, 0.0)
 
     def draw_t_returns(loc: float, scale: float, size: tuple[int, int]) -> np.ndarray:
