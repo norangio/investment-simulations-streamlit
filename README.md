@@ -50,7 +50,7 @@ On push to `main`, GitHub Actions deploys to the VPS using the same pattern as o
 
 ### Required GitHub Actions secrets
 
-- `VPS_HOST` (example: `5.78.109.38`)
+- `VPS_HOST` (your VPS IP address)
 - `VPS_USER` (example: `root`)
 - `VPS_SSH_KEY` (private key with access to the VPS)
 
